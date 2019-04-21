@@ -1,0 +1,8 @@
+[package]
+name = "ring-benchmark-rs"
+version = "0.1.0"
+authors = ["Pierre Zemb <contact@pierrezemb.fr>"]
+edition = "2018"
+
+[dependencies]
+runtime = "0.3.0-alpha.2"
