@@ -1,45 +1,70 @@
 #![feature(async_await, await_macro, futures_api)]
 
-use std::fmt::Error;
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::mpsc;
-use std::sync::mpsc::{Receiver, Sender};
-use std::task::{Context, Poll, Waker};
+use futures::channel::mpsc;
+use futures::channel::mpsc::{Receiver, Sender};
+use futures::Poll;
+use futures::prelude::*;
 
 struct Actor {
     is_first: bool,
-    tx: Sender<i32>,
-    rx: Receiver<i32>,
+    has_started: bool,
+    init_value: i64,
+    tx: Sender<i64>,
+    rx: Receiver<i64>,
 }
 
-impl Future for Actor {
-    type Output = ();
+impl Actor {
+    fn new(is_first: bool, init_value: i64, tx: Sender<i64>, rx: Receiver<i64>) -> Actor {
+        Actor {
+            is_first,
+            has_started: false,
+            init_value,
+            tx,
+            rx,
+        }
+    }
 
-    fn poll(self: Pin<&mut Self>, cx: & mut Context) -> Poll < Self::Output > {
-        //TODO: Test if rx has message
-        Poll::Pending
+    async fn handle(mut self) {
+
+        // init first message
+        if self.is_first && !self.has_started {
+            self.has_started = true;
+            println!("init");
+            await!(self.tx.send(self.init_value));
+        }
+
+        let (nbr, _) = await!(self.rx.into_future());
+        if let Some(nbr) = nbr {
+            println!("received {}", nbr);
+            if self.is_first && nbr <= 0 {
+                println!("closing channel");
+                await!(self.tx.close());
+                return;
+            }
+            await!(self.tx.send(nbr - 1));
+        }
+        println!("finished :(");
     }
 }
 
 
-fn hello(nbr_processes: i64, nrb_iteration: i64) {
+async fn ring(nbr_processes: i64, nrb_iteration: i64) {
+    let (first_tx, first_rx) = mpsc::channel(1);
+    let (second_tx, second_rx) = mpsc::channel(1);
 
-    // for nbr_process in 0..nbr_processes {
-    let (tx, rx): (Sender<i32>, Receiver<i32>) = mpsc::channel();
-    let actor = Actor {
-        is_first: false,
-        tx,
-        rx,
-    };
+    let first = Actor::new(true, nrb_iteration, second_tx, first_rx);
+    let second = Actor::new(false, nrb_iteration, first_tx, second_rx);
 
-    runtime::spawn(actor);
+    runtime::spawn(first.handle());
+    runtime::spawn(second.handle());
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::ring;
+
     #[runtime::test]
-    async fn it_works() {
-        assert_eq!(2 + 2, 4);
+    async fn test_ring() {
+        await!(ring(1, 10));
     }
 }
