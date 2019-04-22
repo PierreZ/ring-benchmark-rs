@@ -34,14 +34,16 @@ impl Actor {
         }
 
         let (nbr, _) = await!(self.rx.into_future());
-        if let Some(nbr) = nbr {
+        if let Some(mut nbr) = nbr {
             println!("received {}", nbr);
-            if self.is_first && nbr <= 0 {
-                println!("closing channel");
-                await!(self.tx.close());
-                return;
+            if self.is_first  {
+                nbr -= 1;
+                if nbr < 0 {
+                    println!("closing channel");
+                    await!(self.tx.close());
+                }
             }
-            await!(self.tx.send(nbr - 1));
+            await!(self.tx.send(nbr));
         }
         println!("finished :(");
     }
@@ -67,4 +69,11 @@ mod tests {
     async fn test_ring() {
         await!(ring(1, 10));
     }
+    // output:
+    // init
+    // received 10
+    // received 10
+    // finished :(
+    // finished :(
+    // test tests::test_ring ... ok
 }
