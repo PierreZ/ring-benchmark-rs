@@ -8,6 +8,7 @@ use futures::prelude::*;
 struct Actor {
     is_first: bool,
     has_started: bool,
+    should_loop: bool,
     init_value: i64,
     tx: Sender<i64>,
     rx: Receiver<i64>,
@@ -18,6 +19,7 @@ impl Actor {
         Actor {
             is_first,
             has_started: false,
+            should_loop: true,
             init_value,
             tx,
             rx,
@@ -30,22 +32,33 @@ impl Actor {
         if self.is_first && !self.has_started {
             self.has_started = true;
             println!("init");
-            await!(self.tx.send(self.init_value));
+            await!(self.tx.send(self.init_value + 1));
         }
 
-        let (nbr, _) = await!(self.rx.into_future());
-        if let Some(mut nbr) = nbr {
-            println!("received {}", nbr);
-            if self.is_first  {
-                nbr -= 1;
-                if nbr < 0 {
-                    println!("closing channel");
-                    await!(self.tx.close());
+        while self.should_loop {
+            let nbr = await!(self.rx.next());
+            match nbr {
+                Some(mut nbr) => {
+                    if self.is_first {
+                        nbr -= 1;
+                        println!("{}", nbr);
+                        if nbr == 0 {
+                            println!("stopping loop");
+                            self.should_loop = false;
+                        }
+                    }
+                    await!(self.tx.send(nbr));
+                }
+
+                // None represents that the tx has been shut, we need to propagate this
+                None => {
+                    println!("stopping loop");
+                    self.should_loop = false;
                 }
             }
-            await!(self.tx.send(nbr));
         }
-        println!("finished :(");
+        println!("closing");
+        await!(self.tx.close());
     }
 }
 
@@ -58,7 +71,7 @@ async fn ring(nbr_processes: i64, nrb_iteration: i64) {
     let second = Actor::new(false, nrb_iteration, first_tx, second_rx);
 
     runtime::spawn(first.handle());
-    runtime::spawn(second.handle());
+    await!(second.handle());
 }
 
 #[cfg(test)]
@@ -67,13 +80,6 @@ mod tests {
 
     #[runtime::test]
     async fn test_ring() {
-        await!(ring(1, 10));
+        await!(ring(1, 10000));
     }
-    // output:
-    // init
-    // received 10
-    // received 10
-    // finished :(
-    // finished :(
-    // test tests::test_ring ... ok
 }
